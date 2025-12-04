@@ -10,8 +10,9 @@ import time
 # -----------------------
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
+HF_API_URL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
+HF_TOKEN = st.secrets["HF_TOKEN"]
 OPENAI_KEY = st.secrets["OPENAI_KEY"]
-MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -22,12 +23,13 @@ INTERVIEW_QUESTIONS = [
 ]
 
 CRITERIA_TEXT = (
-    "Kriteria:\n"
+    "Kriteria Penilaian:\n"
     "0 - Tidak menjawab\n"
     "1 - Tidak relevan\n"
     "2 - Paham general\n"
     "3 - Pemahaman cukup\n"
     "4 - Menguasai materi\n"
+    "5 - Sangat menguasai\n"
 )
 
 # -----------------------
@@ -35,7 +37,7 @@ CRITERIA_TEXT = (
 # -----------------------
 
 def whisper_api_transcribe(video_path):
-    """Send audio/video to Whisper API (OpenAI)."""
+    """Transcribe audio/video using OpenAI Whisper API."""
     url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {OPENAI_KEY}"}
 
@@ -50,27 +52,29 @@ def whisper_api_transcribe(video_path):
     return response.json().get("text", "")
 
 
-def mistral_api_classify(prompt):
-    """Send classification prompt to Mistral official API."""
-    url = "https://api.mistral.ai/v1/chat/completions"
+def mistral_lora_api(prompt):
+    """Call fine-tuned Mistral model on HuggingFace Inference API."""
     headers = {
-        "Authorization": f"Bearer {MISTRAL_API_KEY}",
+        "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    body = {
-        "model": "mistral-large-latest",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 200,
-        "temperature": 0.0
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 200}
     }
 
-    response = requests.post(url, headers=headers, json=body)
+    response = requests.post(HF_API_URL, json=payload, headers=headers)
 
-    if response.status_code != 200:
-        return f"ERROR Mistral: {response.text}"
+    try:
+        result = response.json()
+    except:
+        return "ERROR: Response tidak bisa dibaca."
 
-    return response.json()["choices"][0]["message"]["content"]
+    if isinstance(result, list):
+        return result[0].get("generated_text", "")
+
+    return result.get("generated_text", str(result))
 
 
 # -----------------------
@@ -79,30 +83,33 @@ def mistral_api_classify(prompt):
 
 def prompt_for_classification(question, answer):
     return (
-        "Anda adalah penilai HRD. Klasifikasikan jawaban kandidat dengan skala 0-5.\n\n"
+        "Anda adalah HRD profesional. Nilailah jawaban kandidat dengan skala 0–5.\n\n"
         f"{CRITERIA_TEXT}\n\n"
         f"Pertanyaan: {question}\n"
         f"Jawaban Kandidat: {answer}\n\n"
-        "Format output:\n"
+        "Format Output:\n"
         "KLASIFIKASI: <angka>\n"
-        "ALASAN: <penjelasan singkat>\n"
+        "ALASAN: <teks>\n"
     )
 
 
 def parse_model_output(text):
-    score_match = re.search(r"\b([0-5])\b", text)
-    score = int(score_match.group(1)) if score_match else None
+    """Extract score (0–5) and reason."""
+    score = None
 
-    reason_match = re.search(r"(ALASAN|REASON)\s*[:\-]\s*(.+)", text, flags=re.IGNORECASE | re.DOTALL)
-    reason = reason_match.group(2).strip() if reason_match else text.strip()
+    score_match = re.search(r"\b([0-5])\b", text)
+    if score_match:
+        score = int(score_match.group(1))
+
+    reason_match = re.search(r"(ALASAN|REASON)[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
+    reason = reason_match.group(2).strip() if reason_match else text
 
     return score, reason
 
 
 # -----------------------
-# SESSION STATE
+# SESSION STATE INIT
 # -----------------------
-
 if "page" not in st.session_state:
     st.session_state.page = "input"
 
@@ -111,26 +118,22 @@ if "results" not in st.session_state:
 
 
 # -----------------------
-# INPUT PAGE
+# PAGE: INPUT
 # -----------------------
-
-st.title("🎥 AI-Powered Interview Assessment System")
-
 if st.session_state.page == "input":
-    st.write("Upload 5 video lalu tekan **Mulai Proses Analisis**")
+
+    st.title("🎥 AI-Powered Interview Assessment System")
+    st.write("Upload **5 video interview** lalu klik mulai analisis.")
 
     with st.form("input_form"):
         nama = st.text_input("Nama Pelamar")
-        uploaded = st.file_uploader(
-            "Upload 5 video interview (urut dari 1 → 5)",
-            type=["mp4", "mov", "mkv", "webm"],
-            accept_multiple_files=True
-        )
-        submitted = st.form_submit_button("Mulai Proses Analisis")
+        uploaded = st.file_uploader("Upload 5 Video (1 → 5)", type=["mp4", "mov", "mkv", "webm"], accept_multiple_files=True)
+        submit = st.form_submit_button("Mulai Proses Analisis")
 
-    if submitted:
+    if submit:
+
         if not nama:
-            st.error("Nama harus diisi!")
+            st.error("Nama pelamar wajib diisi.")
             st.stop()
 
         if not uploaded or len(uploaded) != 5:
@@ -138,26 +141,29 @@ if st.session_state.page == "input":
             st.stop()
 
         st.session_state.results = []
+
         progress = st.empty()
 
         # PROCESS EACH VIDEO
         for idx, vid in enumerate(uploaded):
-            progress.info(f"⏳ Memproses video {idx+1}...")
+            progress.info(f"Memproses Video {idx+1}...")
 
-            # Save temporarily
+            # Simpan sementara
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
             tmp.write(vid.read())
             tmp.close()
+
             video_path = tmp.name
 
-            # Step 1 → TRANSCRIBE via Whisper API
+            # Transkripsi
             transcript = whisper_api_transcribe(video_path)
 
-            # Step 2 → CLASSIFY via Mistral API
+            # Klasifikasi jawaban
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
-            raw_output = mistral_api_classify(prompt)
+            raw_output = mistral_lora_api(prompt)
             score, reason = parse_model_output(raw_output)
 
+            # Simpan hasil
             st.session_state.results.append({
                 "question": INTERVIEW_QUESTIONS[idx],
                 "transcript": transcript,
@@ -166,11 +172,7 @@ if st.session_state.page == "input":
                 "raw_model": raw_output
             })
 
-            # cleanup
-            try:
-                os.remove(video_path)
-            except:
-                pass
+            os.remove(video_path)
 
             progress.success(f"Video {idx+1} selesai ✔")
 
@@ -179,26 +181,25 @@ if st.session_state.page == "input":
 
 
 # -----------------------
-# RESULT PAGE
+# PAGE: RESULT
 # -----------------------
-
 if st.session_state.page == "result":
     st.title("📋 Hasil Penilaian Interview")
-    st.subheader(f"Nama Pelamar: {nama}")
+    st.write(f"**Nama Pelamar:** {nama}")
 
-    scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
-
-    if len(scores) == 5:
-        overall = sum(scores) / 5
-        st.markdown(f"### Skor Akhir: **{overall:.2f} / 5**")
+    # Hitung skor akhir
+    valid_scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
+    if len(valid_scores) == 5:
+        final_score = sum(valid_scores) / 5
+        st.markdown(f"### Skor Akhir: **{final_score:.2f} / 5**")
     else:
-        st.markdown("### Skor tidak lengkap")
+        st.error("Skor tidak lengkap.")
 
     st.markdown("---")
-    st.markdown("## Detail Penilaian")
 
+    # Detail
     for i, r in enumerate(st.session_state.results):
-        st.markdown(f"### 🎬 Video {i+1}")
+        st.subheader(f"🎬 Video {i+1}")
         st.write(f"**Pertanyaan:** {r['question']}")
         st.write(f"**Transkrip:** {r['transcript']}")
         st.write(f"**Skor:** {r['score']}")
@@ -207,7 +208,7 @@ if st.session_state.page == "result":
             st.code(r["raw_model"])
         st.markdown("---")
 
-    if st.button("Kembali ke Halaman Input"):
+    if st.button("Kembali ke Input"):
         st.session_state.page = "input"
         st.session_state.results = []
         st.rerun()

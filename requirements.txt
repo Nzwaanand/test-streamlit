@@ -3,3 +3,4 @@ python-dotenv
 openai>=1.13.0
 mistralai
 ffmpeg-python
+openai-whisper

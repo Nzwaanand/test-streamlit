@@ -1,9 +1,6 @@
 import streamlit as st
-import tempfile
-import os
-import re
-from transformers import pipeline
 import requests
+import re
 
 # -----------------------
 # CONFIG
@@ -12,6 +9,7 @@ st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
 HF_API_URL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
 HF_TOKEN = st.secrets["HF_TOKEN"]
+HF_WHISPER_MODEL = "NbAiLab/nb-whisper-medium"
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -31,26 +29,19 @@ CRITERIA_TEXT = (
 )
 
 # -----------------------
-# LOAD WHISPER PIPELINE SEKALI
-# -----------------------
-@st.cache_resource(show_spinner=True)
-def load_whisper_pipeline():
-    return pipeline(
-        model="NbAiLab/nb-whisper-medium",
-        task="automatic-speech-recognition",
-        chunk_length_s=30
-    )
-
-if "whisper_pipe" not in st.session_state:
-    st.session_state.whisper_pipe = load_whisper_pipeline()
-
-# -----------------------
 # FUNCTIONS
 # -----------------------
-def whisper_transcribe(video_path):
-    """Transkripsi video langsung pakai pipeline HuggingFace"""
-    result = st.session_state.whisper_pipe(video_path)
-    return result["text"]
+
+def transcribe_via_hf(video_bytes):
+    """Kirim video ke HuggingFace Whisper API untuk transkripsi"""
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    files = {"file": ("video.mp4", video_bytes)}
+    url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
+    response = requests.post(url, headers=headers, files=files)
+    if response.status_code == 200:
+        return response.json().get("text", "")
+    else:
+        return f"ERROR: {response.status_code} - {response.text}"
 
 def mistral_lora_api(prompt):
     """Call fine-tuned Mistral model on HuggingFace Inference API."""
@@ -129,14 +120,13 @@ if st.session_state.page == "input":
         for idx, vid in enumerate(uploaded):
             progress.info(f"Memproses Video {idx+1}...")
 
-            tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-            tmp_video.write(vid.read())
-            tmp_video.close()
-            video_path = tmp_video.name
+            # Baca video bytes
+            video_bytes = vid.read()
 
-            # Transkripsi langsung video
-            transcript = whisper_transcribe(video_path)
+            # Transkripsi via HuggingFace API
+            transcript = transcribe_via_hf(video_bytes)
 
+            # Analisis jawaban via Mistral LORA API
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
             raw_output = mistral_lora_api(prompt)
             score, reason = parse_model_output(raw_output)
@@ -149,7 +139,6 @@ if st.session_state.page == "input":
                 "raw_model": raw_output
             })
 
-            os.remove(video_path)
             progress.success(f"Video {idx+1} selesai ✔")
 
         st.session_state.page = "result"

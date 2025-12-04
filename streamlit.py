@@ -38,7 +38,7 @@ CRITERIA_TEXT = (
 
 def whisper_api_transcribe(video_path):
     """Transcribe audio/video using OpenAI Whisper API."""
-    url = "https://api.openai.com/v1/audio/transcriptions"
+    url = "https://api.openai.com/v2/audio/transcriptions"
     headers = {"Authorization": f"Bearer {OPENAI_KEY}"}
 
     files = {"file": open(video_path, "rb")}

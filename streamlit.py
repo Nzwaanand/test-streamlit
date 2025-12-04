@@ -35,16 +35,16 @@ CRITERIA_TEXT = (
 @st.cache_resource(show_spinner=True)
 def load_whisper_pipeline():
     return pipeline(model="NbAiLab/nb-whisper-medium", task="automatic-speech-recognition")
-
-whisper_pipe = load_whisper_pipeline()
+    
+    if "whisper_pipe" not in st.session_state:
+        st.session_state.whisper_pipe = load_whisper_pipeline()
 
 # -----------------------
 # FUNCTIONS
 # -----------------------
 
 def whisper_transcribe(video_path):
-    """Transkripsi video langsung pakai pipeline HuggingFace"""
-    result = whisper_pipe(video_path)
+    result = st.session_state.whisper_pipe(video_path)
     return result["text"]
 
 def mistral_lora_api(prompt):

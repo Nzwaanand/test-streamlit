@@ -4,4 +4,3 @@ mistralai
 ffmpeg-python
 openai-whisper
 requests
-sudo apt-get install ffmpeg 

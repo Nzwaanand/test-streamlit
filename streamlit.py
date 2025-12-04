@@ -3,7 +3,6 @@ import tempfile
 import os
 import re
 import whisper
-from moviepy.editor import AudioFileClip
 
 # -----------------------
 # CONFIG
@@ -43,17 +42,9 @@ whisper_model = load_whisper_model()
 # -----------------------
 # FUNCTIONS
 # -----------------------
-def video_to_audio(video_path):
-    """Ekstrak audio dari video menjadi file WAV sementara"""
-    audio_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    clip = AudioFileClip(video_path)
-    clip.write_audiofile(audio_tmp.name, verbose=False, logger=None)
-    clip.close()
-    return audio_tmp.name
-
-def whisper_local_transcribe(audio_path):
-    """Transcribe audio menggunakan Whisper lokal"""
-    result = whisper_model.transcribe(audio_path)
+def whisper_local_transcribe(video_path):
+    """Transcribe audio/video using local Whisper."""
+    result = whisper_model.transcribe(video_path)
     return result["text"]
 
 def mistral_lora_api(prompt):
@@ -65,12 +56,15 @@ def mistral_lora_api(prompt):
     }
     payload = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
     response = requests.post(HF_API_URL, json=payload, headers=headers)
+
     try:
         result = response.json()
     except:
         return "ERROR: Response tidak bisa dibaca."
+
     if isinstance(result, list):
         return result[0].get("generated_text", "")
+
     return result.get("generated_text", str(result))
 
 def prompt_for_classification(question, answer):
@@ -134,17 +128,13 @@ if st.session_state.page == "input":
         for idx, vid in enumerate(uploaded):
             progress.info(f"Memproses Video {idx+1}...")
 
-            # Simpan video sementara
-            tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-            tmp_video.write(vid.read())
-            tmp_video.close()
-            video_path = tmp_video.name
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            tmp.write(vid.read())
+            tmp.close()
+            video_path = tmp.name
 
-            # Konversi video → audio
-            audio_path = video_to_audio(video_path)
-
-            # Transkripsi pakai Whisper small
-            transcript = whisper_local_transcribe(audio_path)
+            # Transkripsi pakai Whisper lokal small
+            transcript = whisper_local_transcribe(video_path)
 
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
             raw_output = mistral_lora_api(prompt)
@@ -158,9 +148,7 @@ if st.session_state.page == "input":
                 "raw_model": raw_output
             })
 
-            # Hapus file sementara
             os.remove(video_path)
-            os.remove(audio_path)
             progress.success(f"Video {idx+1} selesai ✔")
 
         st.session_state.page = "result"

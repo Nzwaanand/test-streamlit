@@ -15,7 +15,7 @@ from peft import PeftModel
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
 MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.2"
-ADAPTER_DIR = "./mistral_interview_classifier_adapter"
+ADAPTER_DIR = "nndayoow/mistral-interview-lora"
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -78,7 +78,7 @@ def load_classifier():
     )
 
     ft_model = PeftModel.from_pretrained(base_model, ADAPTER_DIR)
-    # ensure model on CPU
+
     try:
         ft_model = ft_model.to("cpu")
     except Exception:

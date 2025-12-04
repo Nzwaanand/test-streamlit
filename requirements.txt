@@ -3,3 +3,4 @@ python-dotenv
 mistralai
 ffmpeg-python
 openai-whisper
+requests

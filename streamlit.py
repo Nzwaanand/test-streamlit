@@ -2,7 +2,6 @@ import streamlit as st
 import tempfile
 import os
 import re
-from transformers import pipeline
 
 # -----------------------
 # CONFIG

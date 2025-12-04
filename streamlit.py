@@ -28,7 +28,6 @@ CRITERIA_TEXT = (
     "2 - Paham general\n"
     "3 - Pemahaman cukup\n"
     "4 - Menguasai materi\n"
-    "5 - Sangat menguasai\n"
 )
 
 # -----------------------

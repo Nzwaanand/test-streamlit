@@ -3,15 +3,15 @@ import tempfile
 import os
 import re
 import requests
-import whisper
 
 # -----------------------
 # CONFIG
 # -----------------------
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
-HF_API_URL = "https://router.huggingface.co/api/models/nndayoow/mistral-interview-lora"
+HF_API_URL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
 HF_TOKEN = st.secrets["HF_TOKEN"]
+OPENAI_KEY = st.secrets["OPENAI_KEY"]
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -32,40 +32,43 @@ CRITERIA_TEXT = (
 )
 
 # -----------------------
-# LOAD WHISPER MODEL SEKALI
+# API FUNCTIONS
 # -----------------------
-@st.cache_resource(show_spinner=True)
-def load_whisper_model():
-    return whisper.load_model("medium")  # Bisa diganti "small" atau "base" untuk lebih ringan
+def whisper_api_transcribe(video_path):
+    """Transcribe audio/video using OpenAI Whisper API."""
+    url = "https://api.openai.com/v1/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {OPENAI_KEY}"}
 
-whisper_model = load_whisper_model()
+    with open(video_path, "rb") as f:
+        files = {"file": f}
+        data = {"model": "whisper-1"}
+        response = requests.post(url, headers=headers, files=files, data=data)
 
-# -----------------------
-# FUNCTIONS
-# -----------------------
-def whisper_local_transcribe(video_path):
-    """Transcribe audio/video menggunakan local Whisper dengan error handling."""
-    try:
-        result = whisper_model.transcribe(video_path)
-        return result.get("text", "")
-    except Exception as e:
-        return f"ERROR transkripsi: {e}"
+    if response.status_code != 200:
+        return f"ERROR Whisper: {response.text}"
+
+    return response.json().get("text", "")
+
 
 def mistral_lora_api(prompt):
-    """Call fine-tuned Mistral model di HuggingFace Inference API."""
+    """Call fine-tuned Mistral model on HuggingFace Inference API."""
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
+    response = requests.post(HF_API_URL, json=payload, headers=headers)
+
     try:
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
-        response = requests.post(HF_API_URL, json=payload, headers=headers)
         result = response.json()
-        if isinstance(result, list):
-            return result[0].get("generated_text", "")
-        return result.get("generated_text", str(result))
-    except Exception as e:
-        return f"ERROR API Mistral: {e}"
+    except:
+        return "ERROR: Response tidak bisa dibaca."
+
+    if isinstance(result, list):
+        return result[0].get("generated_text", "")
+
+    return result.get("generated_text", str(result))
+
 
 # -----------------------
 # HELPERS
@@ -81,25 +84,32 @@ def prompt_for_classification(question, answer):
         "ALASAN: <teks>\n"
     )
 
+
 def parse_model_output(text):
-    """Extract score (0–5) dan alasan."""
+    """Extract score (0–5) and reason."""
     score = None
     score_match = re.search(r"\b([0-5])\b", text)
     if score_match:
         score = int(score_match.group(1))
+
     reason_match = re.search(r"(ALASAN|REASON)[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     reason = reason_match.group(2).strip() if reason_match else text
+
     return score, reason
+
 
 # -----------------------
 # SESSION STATE INIT
 # -----------------------
 if "page" not in st.session_state:
     st.session_state.page = "input"
+
 if "results" not in st.session_state:
     st.session_state.results = []
+
 if "nama" not in st.session_state:
     st.session_state.nama = ""
+
 
 # -----------------------
 # PAGE: INPUT
@@ -110,11 +120,7 @@ if st.session_state.page == "input":
 
     with st.form("input_form"):
         nama = st.text_input("Nama Pelamar")
-        uploaded = st.file_uploader(
-            "Upload 5 Video (1 → 5)", 
-            type=["mp4", "mov", "mkv", "webm"], 
-            accept_multiple_files=True
-        )
+        uploaded = st.file_uploader("Upload 5 Video (1 → 5)", type=["mp4", "mov", "mkv", "webm"], accept_multiple_files=True)
         submit = st.form_submit_button("Mulai Proses Analisis")
 
     if submit:
@@ -125,11 +131,12 @@ if st.session_state.page == "input":
             st.error("Harap upload tepat 5 video.")
             st.stop()
 
-        st.session_state.nama = nama
+        st.session_state.nama = nama  # simpan di session state
         st.session_state.results = []
 
         progress = st.empty()
 
+        # PROCESS EACH VIDEO
         for idx, vid in enumerate(uploaded):
             progress.info(f"Memproses Video {idx+1}...")
 
@@ -139,14 +146,15 @@ if st.session_state.page == "input":
             tmp.close()
             video_path = tmp.name
 
-            # Transkripsi dengan Whisper lokal
-            transcript = whisper_local_transcribe(video_path)
+            # Transkripsi
+            transcript = whisper_api_transcribe(video_path)
 
             # Klasifikasi jawaban
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
             raw_output = mistral_lora_api(prompt)
             score, reason = parse_model_output(raw_output)
 
+            # Simpan hasil
             st.session_state.results.append({
                 "question": INTERVIEW_QUESTIONS[idx],
                 "transcript": transcript,
@@ -159,7 +167,8 @@ if st.session_state.page == "input":
             progress.success(f"Video {idx+1} selesai ✔")
 
         st.session_state.page = "result"
-        st.experimental_rerun()  # Hanya sekali panggil rerun
+        st.rerun()
+
 
 # -----------------------
 # PAGE: RESULT
@@ -168,6 +177,7 @@ if st.session_state.page == "result":
     st.title("📋 Hasil Penilaian Interview")
     st.write(f"**Nama Pelamar:** {st.session_state.nama}")
 
+    # Hitung skor akhir
     valid_scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
     if len(valid_scores) == 5:
         final_score = sum(valid_scores) / 5
@@ -176,6 +186,8 @@ if st.session_state.page == "result":
         st.error("Skor tidak lengkap.")
 
     st.markdown("---")
+
+    # Detail hasil tiap video
     for i, r in enumerate(st.session_state.results):
         st.subheader(f"🎬 Video {i+1}")
         st.write(f"**Pertanyaan:** {r['question']}")
@@ -190,4 +202,4 @@ if st.session_state.page == "result":
         st.session_state.page = "input"
         st.session_state.results = []
         st.session_state.nama = ""
-        st.experimental_rerun()
+        st.rerun()

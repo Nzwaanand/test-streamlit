@@ -3,6 +3,7 @@ import tempfile
 import os
 import re
 import whisper
+import ffmpeg
 
 # -----------------------
 # CONFIG

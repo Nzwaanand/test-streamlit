@@ -41,7 +41,7 @@ whisper_pipe = load_whisper_pipeline()
 # -----------------------
 # FUNCTIONS
 # -----------------------
-ef load_whisper_pipeline():
+def load_whisper_pipeline():
     return pipeline(model="NbAiLab/nb-whisper-medium", task="automatic-speech-recognition")
 
 whisper_pipe = load_whisper_pipeline()

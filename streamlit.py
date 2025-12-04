@@ -2,7 +2,7 @@ import streamlit as st
 import tempfile
 import os
 import re
-import requests
+import whisper
 
 # -----------------------
 # CONFIG
@@ -11,7 +11,6 @@ st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
 HF_API_URL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
 HF_TOKEN = st.secrets["HF_TOKEN"]
-OPENAI_KEY = st.secrets["OPENAI_KEY"]
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -32,26 +31,25 @@ CRITERIA_TEXT = (
 )
 
 # -----------------------
-# API FUNCTIONS
+# LOAD WHISPER SMALL SEKALI
 # -----------------------
-def whisper_api_transcribe(video_path):
-    """Transcribe audio/video using OpenAI Whisper API."""
-    url = "https://api.openai.com/v1/audio/transcriptions"
-    headers = {"Authorization": f"Bearer {OPENAI_KEY}"}
+@st.cache_resource(show_spinner=True)
+def load_whisper_model():
+    return whisper.load_model("small")
 
-    with open(video_path, "rb") as f:
-        files = {"file": f}
-        data = {"model": "whisper-1"}
-        response = requests.post(url, headers=headers, files=files, data=data)
+whisper_model = load_whisper_model()
 
-    if response.status_code != 200:
-        return f"ERROR Whisper: {response.text}"
-
-    return response.json().get("text", "")
-
+# -----------------------
+# FUNCTIONS
+# -----------------------
+def whisper_local_transcribe(video_path):
+    """Transcribe audio/video using local Whisper."""
+    result = whisper_model.transcribe(video_path)
+    return result["text"]
 
 def mistral_lora_api(prompt):
     """Call fine-tuned Mistral model on HuggingFace Inference API."""
+    import requests
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
@@ -69,10 +67,6 @@ def mistral_lora_api(prompt):
 
     return result.get("generated_text", str(result))
 
-
-# -----------------------
-# HELPERS
-# -----------------------
 def prompt_for_classification(question, answer):
     return (
         "Anda adalah HRD profesional. Nilailah jawaban kandidat dengan skala 0–5.\n\n"
@@ -84,32 +78,24 @@ def prompt_for_classification(question, answer):
         "ALASAN: <teks>\n"
     )
 
-
 def parse_model_output(text):
-    """Extract score (0–5) and reason."""
     score = None
     score_match = re.search(r"\b([0-5])\b", text)
     if score_match:
         score = int(score_match.group(1))
-
     reason_match = re.search(r"(ALASAN|REASON)[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     reason = reason_match.group(2).strip() if reason_match else text
-
     return score, reason
-
 
 # -----------------------
 # SESSION STATE INIT
 # -----------------------
 if "page" not in st.session_state:
     st.session_state.page = "input"
-
 if "results" not in st.session_state:
     st.session_state.results = []
-
 if "nama" not in st.session_state:
     st.session_state.nama = ""
-
 
 # -----------------------
 # PAGE: INPUT
@@ -120,7 +106,11 @@ if st.session_state.page == "input":
 
     with st.form("input_form"):
         nama = st.text_input("Nama Pelamar")
-        uploaded = st.file_uploader("Upload 5 Video (1 → 5)", type=["mp4", "mov", "mkv", "webm"], accept_multiple_files=True)
+        uploaded = st.file_uploader(
+            "Upload 5 Video (1 → 5)", 
+            type=["mp4", "mov", "mkv", "webm"], 
+            accept_multiple_files=True
+        )
         submit = st.form_submit_button("Mulai Proses Analisis")
 
     if submit:
@@ -131,30 +121,25 @@ if st.session_state.page == "input":
             st.error("Harap upload tepat 5 video.")
             st.stop()
 
-        st.session_state.nama = nama  # simpan di session state
+        st.session_state.nama = nama
         st.session_state.results = []
-
         progress = st.empty()
 
-        # PROCESS EACH VIDEO
         for idx, vid in enumerate(uploaded):
             progress.info(f"Memproses Video {idx+1}...")
 
-            # Simpan sementara
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
             tmp.write(vid.read())
             tmp.close()
             video_path = tmp.name
 
-            # Transkripsi
-            transcript = whisper_api_transcribe(video_path)
+            # Transkripsi pakai Whisper lokal small
+            transcript = whisper_local_transcribe(video_path)
 
-            # Klasifikasi jawaban
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
             raw_output = mistral_lora_api(prompt)
             score, reason = parse_model_output(raw_output)
 
-            # Simpan hasil
             st.session_state.results.append({
                 "question": INTERVIEW_QUESTIONS[idx],
                 "transcript": transcript,
@@ -169,7 +154,6 @@ if st.session_state.page == "input":
         st.session_state.page = "result"
         st.rerun()
 
-
 # -----------------------
 # PAGE: RESULT
 # -----------------------
@@ -177,7 +161,6 @@ if st.session_state.page == "result":
     st.title("📋 Hasil Penilaian Interview")
     st.write(f"**Nama Pelamar:** {st.session_state.nama}")
 
-    # Hitung skor akhir
     valid_scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
     if len(valid_scores) == 5:
         final_score = sum(valid_scores) / 5
@@ -186,8 +169,6 @@ if st.session_state.page == "result":
         st.error("Skor tidak lengkap.")
 
     st.markdown("---")
-
-    # Detail hasil tiap video
     for i, r in enumerate(st.session_state.results):
         st.subheader(f"🎬 Video {i+1}")
         st.write(f"**Pertanyaan:** {r['question']}")

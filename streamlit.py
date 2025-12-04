@@ -7,9 +7,9 @@ import re
 # -----------------------
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
-HF_API_URL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 HF_WHISPER_MODEL = "NbAiLab/nb-whisper-medium"
+HF_MISTRAL_MODEL = "https://api-inference.huggingface.co/models/nndayoow/mistral-interview-lora"
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -39,18 +39,17 @@ def transcribe_via_hf(video_bytes):
     url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
     response = requests.post(url, headers=headers, files=files)
     if response.status_code == 200:
-        return response.json().get("text", "")
+        data = response.json()
+        # HF Whisper API kadang return {"text": "..."} atau {"error": "..."}
+        return data.get("text", "") or data.get("error", "")
     else:
         return f"ERROR: {response.status_code} - {response.text}"
 
 def mistral_lora_api(prompt):
-    """Call fine-tuned Mistral model on HuggingFace Inference API."""
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    """Kirim prompt ke Mistral LORA HF API untuk scoring jawaban"""
+    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
     payload = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
-    response = requests.post(HF_API_URL, json=payload, headers=headers)
+    response = requests.post(HF_MISTRAL_MODEL, headers=headers, json=payload)
     try:
         result = response.json()
     except:
@@ -61,20 +60,17 @@ def mistral_lora_api(prompt):
 
 def prompt_for_classification(question, answer):
     return (
-        "Anda adalah HRD profesional. Nilailah jawaban kandidat dengan skala 0–5.\n\n"
+        f"Anda adalah HRD profesional. Nilailah jawaban kandidat dengan skala 0–5.\n\n"
         f"{CRITERIA_TEXT}\n\n"
         f"Pertanyaan: {question}\n"
         f"Jawaban Kandidat: {answer}\n\n"
-        "Format Output:\n"
-        "KLASIFIKASI: <angka>\n"
-        "ALASAN: <teks>\n"
+        "Format Output:\nKLASIFIKASI: <angka>\nALASAN: <teks>\n"
     )
 
 def parse_model_output(text):
-    score = None
+    """Ambil skor dan alasan dari output model"""
     score_match = re.search(r"\b([0-5])\b", text)
-    if score_match:
-        score = int(score_match.group(1))
+    score = int(score_match.group(1)) if score_match else None
     reason_match = re.search(r"(ALASAN|REASON)[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     reason = reason_match.group(2).strip() if reason_match else text
     return score, reason
@@ -119,14 +115,12 @@ if st.session_state.page == "input":
 
         for idx, vid in enumerate(uploaded):
             progress.info(f"Memproses Video {idx+1}...")
-
-            # Baca video bytes
             video_bytes = vid.read()
 
-            # Transkripsi via HuggingFace API
+            # --- Transkripsi via HF API ---
             transcript = transcribe_via_hf(video_bytes)
 
-            # Analisis jawaban via Mistral LORA API
+            # --- Analisis jawaban via Mistral LORA ---
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
             raw_output = mistral_lora_api(prompt)
             score, reason = parse_model_output(raw_output)

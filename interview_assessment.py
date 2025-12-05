@@ -10,6 +10,7 @@ st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 # ======== Your HF TOKEN ========
 HF_TOKEN = st.secrets["HF_TOKEN"]
 HF_PHI3_MODEL = "nndayoow/phi3-interview-system"
+HF_WHISPER_MODEL = "openai/whisper-medium"
 
 # ======== Interview Questions ========
 INTERVIEW_QUESTIONS = [
@@ -30,24 +31,17 @@ CRITERIA_TEXT = (
 )
 
 # ======== Functions ========
-whisper_model = whisper.load_model("medium")
-
-def transcribe_via_whisper_local(video_bytes):
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-        tmp_file.write(video_bytes)
-        tmp_path = tmp_file.name
-
+def transcribe_via_hf(video_bytes):
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    files = {"file": ("video.mp4", video_bytes)}
+    url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
     try:
-        # transkripsi menggunakan Whisper
-        result = whisper_model.transcribe(tmp_path)
-        text = result.get("text", "")
+        response = requests.post(url, headers=headers, files=files, timeout=300)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("text", "") or data.get("error", "")
     except Exception as e:
-        text = f"ERROR: {str(e)}"
-    finally:
-        # hapus file sementara
-        os.remove(tmp_path)
-    return text
+        return f"ERROR: {str(e)}"
 
 def phi3_api(prompt):
     headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}

@@ -138,10 +138,7 @@ if st.session_state.page == "input":
                 progress.success(f"Video {idx+1} selesai ✔")
 
             st.session_state.page = "result"
-            if not st.session_state.rerun_done:
-                st.session_state.rerun_done = True
-                st.experimental_rerun()
-
+        
 # -----------------------
 # PAGE: RESULT
 # -----------------------

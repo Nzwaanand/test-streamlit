@@ -1,12 +1,13 @@
 import streamlit as st
 import requests
 import re
+import whisper
 
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
 # ======== Your HF TOKEN ========
 HF_TOKEN = st.secrets["HF_TOKEN"]
-HF_MISTRAL_MODEL = "nndayoow/phi3-interview-system"
+HF_PHI3_MODEL = "nndayoow/phi3-interview-system"
 
 # ======== Interview Questions ========
 INTERVIEW_QUESTIONS = [
@@ -27,38 +28,49 @@ CRITERIA_TEXT = (
 )
 
 # ======== Functions ========
-def transcribe_via_hf(video_bytes):
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    files = {"file": ("video.mp4", video_bytes)}
-    url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
+whisper_model = whisper.load_model("medium")
+
+def transcribe_via_whisper_local(video_bytes):
+    import tempfile
+    import os
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
+        tmp_file.write(video_bytes)
+        tmp_path = tmp_file.name
+
     try:
-        response = requests.post(url, headers=headers, files=files, timeout=120)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("text", "") or data.get("error", "")
+        # transkripsi menggunakan Whisper
+        result = whisper_model.transcribe(tmp_path)
+        text = result.get("text", "")
     except Exception as e:
-        return f"ERROR: {str(e)}"
+        text = f"ERROR: {str(e)}"
+    finally:
+        # hapus file sementara
+        os.remove(tmp_path)
+    return text
 
-
-def mistral_lora_api(prompt):
+def phi3_api(prompt):
     headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
-    payload = {"inputs": prompt,
-               "parameters": {"max_new_tokens": 200},
-               "options": {"wait_for_model": True}}
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 200},
+        "options": {"wait_for_model": True}
+    }
 
     try:
-        response = requests.post(f"https://api-inference.huggingface.co/models/{HF_MISTRAL_MODEL}",
-                                headers=headers, json=payload, timeout=120)
+        response = requests.post(
+            f"https://api-inference.huggingface.co/models/{HF_PHI3_MODEL}",
+            headers=headers,
+            json=payload,
+            timeout=120
+        )
         response.raise_for_status()
         result = response.json()
-
         if isinstance(result, list) and len(result) > 0:
             return result[0].get("generated_text", "")
         return str(result)
-
     except Exception as e:
         return f"ERROR: {str(e)}"
-
 
 def prompt_for_classification(question, answer):
     return (
@@ -124,7 +136,7 @@ if st.session_state.processing_done and st.session_state.page == "result":
             
             transcript = transcribe_via_hf(bytes_data)
             prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
-            raw_output = mistral_lora_api(prompt)
+            raw_output = phi3_api(prompt)
             score, reason = parse_model_output(raw_output)
 
             st.session_state.results.append({

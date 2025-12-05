@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import re
-import whisper
 import tempfile
 import os
 

@@ -6,7 +6,7 @@ st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
 # ======== Your HF TOKEN ========
 HF_TOKEN = st.secrets["HF_TOKEN"]
-HF_WHISPER_MODEL = "openai/whisper-base"
+HF_WHISPER_MODEL = "openai/whisper-large"
 HF_MISTRAL_MODEL = "nndayoow/mistral-interview-lora"
 
 # ======== Interview Questions ========

@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import re
 import whisper
+import tempfile
+import os
 
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
@@ -31,8 +33,6 @@ CRITERIA_TEXT = (
 whisper_model = whisper.load_model("medium")
 
 def transcribe_via_whisper_local(video_bytes):
-    import tempfile
-    import os
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
         tmp_file.write(video_bytes)

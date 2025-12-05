@@ -91,6 +91,7 @@ if "rerun_done" not in st.session_state:
 # -----------------------
 # PAGE: INPUT
 # -----------------------
+
 if st.session_state.page == "input":
     st.title("🎥 AI-Powered Interview Assessment System")
     st.write("Upload **5 video interview** lalu klik mulai analisis.")
@@ -116,30 +117,8 @@ if st.session_state.page == "input":
         if not error_flag:
             st.session_state.nama = nama
             st.session_state.results = []
-            progress = st.empty()
-
-            for idx, vid in enumerate(uploaded):
-                progress.info(f"Memproses Video {idx+1}...")
-                video_bytes = vid.read()
-
-                transcript = transcribe_via_hf(video_bytes)
-                prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
-                raw_output = mistral_lora_api(prompt)
-                score, reason = parse_model_output(raw_output)
-
-                st.session_state.results.append({
-                    "question": INTERVIEW_QUESTIONS[idx],
-                    "transcript": transcript,
-                    "score": score,
-                    "reason": reason,
-                    "raw_model": raw_output
-                })
-
-                progress.success(f"Video {idx+1} selesai ✔")
-
-            st.session_state.processing_done = True
-            if st.session_state.processing_done:
-                st.session_state.page = "result"
+            st.session_state.processing_done = True  # Flag untuk pindah ke result
+            st.session_state.page = "result"
 
 # -----------------------
 # PAGE: RESULT

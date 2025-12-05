@@ -31,9 +31,7 @@ CRITERIA_TEXT = (
 # -----------------------
 # FUNCTIONS
 # -----------------------
-
 def transcribe_via_hf(video_bytes):
-    """Kirim video ke HuggingFace Whisper API untuk transkripsi"""
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     files = {"file": ("video.mp4", video_bytes)}
     url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
@@ -45,11 +43,10 @@ def transcribe_via_hf(video_bytes):
         return f"ERROR: {response.status_code} - {response.text}"
 
 def mistral_lora_api(prompt):
-    """Kirim prompt ke Mistral LORA HF API untuk scoring jawaban"""
     headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
     payload = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
-    response = requests.post(HF_MISTRAL_MODEL, headers=headers, json=payload)
     try:
+        response = requests.post(HF_MISTRAL_MODEL, headers=headers, json=payload)
         result = response.json()
         if isinstance(result, list) and len(result) > 0:
             return result[0].get("generated_text", "")
@@ -70,7 +67,6 @@ def prompt_for_classification(question, answer):
     )
 
 def parse_model_output(text):
-    """Ambil skor dan alasan dari output model"""
     score_match = re.search(r"\b([0-5])\b", text)
     score = int(score_match.group(1)) if score_match else None
     reason_match = re.search(r"(ALASAN|REASON)[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
@@ -104,41 +100,40 @@ if st.session_state.page == "input":
         submit = st.form_submit_button("Mulai Proses Analisis")
 
     if submit:
+        error_flag = False
         if not nama:
             st.error("Nama pelamar wajib diisi.")
-            st.stop()
+            error_flag = True
         if not uploaded or len(uploaded) != 5:
             st.error("Harap upload tepat 5 video.")
-            st.stop()
+            error_flag = True
 
-        st.session_state.nama = nama
-        st.session_state.results = []
-        progress = st.empty()
+        if not error_flag:
+            st.session_state.nama = nama
+            st.session_state.results = []
+            progress = st.empty()
 
-        for idx, vid in enumerate(uploaded):
-            progress.info(f"Memproses Video {idx+1}...")
-            video_bytes = vid.read()
+            for idx, vid in enumerate(uploaded):
+                progress.info(f"Memproses Video {idx+1}...")
+                video_bytes = vid.read()
 
-            # --- Transkripsi via HF API ---
-            transcript = transcribe_via_hf(video_bytes)
+                transcript = transcribe_via_hf(video_bytes)
+                prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
+                raw_output = mistral_lora_api(prompt)
+                score, reason = parse_model_output(raw_output)
 
-            # --- Analisis jawaban via Mistral LORA ---
-            prompt = prompt_for_classification(INTERVIEW_QUESTIONS[idx], transcript)
-            raw_output = mistral_lora_api(prompt)
-            score, reason = parse_model_output(raw_output)
+                st.session_state.results.append({
+                    "question": INTERVIEW_QUESTIONS[idx],
+                    "transcript": transcript,
+                    "score": score,
+                    "reason": reason,
+                    "raw_model": raw_output
+                })
 
-            st.session_state.results.append({
-                "question": INTERVIEW_QUESTIONS[idx],
-                "transcript": transcript,
-                "score": score,
-                "reason": reason,
-                "raw_model": raw_output
-            })
+                progress.success(f"Video {idx+1} selesai ✔")
 
-            progress.success(f"Video {idx+1} selesai ✔")
-
-        st.session_state.page = "result"
-        st.experimental_rerun()
+            st.session_state.page = "result"
+            st.experimental_rerun()
 
 # -----------------------
 # PAGE: RESULT

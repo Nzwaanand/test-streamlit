@@ -145,9 +145,9 @@ if st.session_state.processing_done and st.session_state.page == "result":
 
     #======== Show Result ========
     scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
-    if len(scores) == 5:
-        final_score = sum(scores)/5
-        st.markdown(f"### ⭐ Skor Akhir: **{final_score:.2f} / 5**")
+    if len(scores) == 4:
+        final_score = sum(scores)/4
+        st.markdown(f"### ⭐ Skor Akhir: **{final_score:.2f} / 4**")
     else:
         st.error("Skor tidak semua berhasil diproses. Cek raw output model.")
 

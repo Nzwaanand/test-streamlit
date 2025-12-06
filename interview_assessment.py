@@ -31,7 +31,7 @@ CRITERIA_TEXT = (
 
 # ======== Functions ========
 def transcribe_via_hf(video_bytes):
-    url = f"https://api-inference.huggingface.co/models/{HF_WHISPER_MODEL}"
+    url = f"https://router.huggingface.co/models/{HF_WHISPER_MODEL}"
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}"
     }
@@ -63,7 +63,7 @@ def phi3_api(prompt):
 
     try:
         response = requests.post(
-            f"https://api-inference.huggingface.co/models/{HF_PHI3_MODEL}",
+            f"https://router.huggingface.co/models/{HF_PHI3_MODEL}",
             headers=headers,
             json=payload,
             timeout=120

@@ -8,8 +8,9 @@ import subprocess
 # ========================= CONFIG =========================
 st.set_page_config(page_title="AI Interview Assessment", layout="wide")
 
-HF_PHI3_MODEL = "microsoft/Phi-3-mini-4k-instruct"
-HF_WHISPER_MODEL = "openai/whisper-large-v3"
+# Model yang benar & aman untuk CPU
+HF_PHI3_MODEL = "microsoft/Phi-3.5-mini-instruct"
+HF_WHISPER_MODEL = "openai/whisper-large-v3-turbo"
 
 INTERVIEW_QUESTIONS = [
     "Can you share any specific challenges you faced while working on certification and how you overcame them?",
@@ -28,60 +29,65 @@ CRITERIA = (
     "4 - Deep understanding with inovative solution\n"
 )
 
-# ========================= PIPELINE CACHE =========================
+# ========================= SAFE MODEL LOADING =========================
 @st.cache_resource
 def get_asr_pipeline():
-    return pipeline(
-        task="automatic-speech-recognition",
-        model=HF_WHISPER_MODEL
-    )
+    try:
+        return pipeline(
+            task="automatic-speech-recognition",
+            model=HF_WHISPER_MODEL
+        )
+    except Exception as e:
+        st.error(f"Gagal memuat model Whisper: {e}")
+        return None
+
 
 @st.cache_resource
 def get_llm_pipeline():
-    return pipeline(
-        task="text-generation",
-        model=HF_PHI3_MODEL
-    )
+    try:
+        return pipeline(
+            task="text-generation",
+            model=HF_PHI3_MODEL
+        )
+    except Exception as e:
+        st.error(f"Gagal memuat model Phi-3: {e}")
+        return None
+
 
 # ========================= FUNCTIONS =========================
 def transcribe_via_hf(video_bytes):
-    """
-    Transkripsi video/audio menggunakan Whisper lokal di HF Space.
-    """
     asr = get_asr_pipeline()
+    if asr is None:
+        return "ERROR: Model Whisper gagal dimuat."
 
-    # Simpan input video sementara
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_in:
         tmp_in.write(video_bytes)
         tmp_in.flush()
         tmp_in_path = tmp_in.name
 
-    # Simpan output audio sementara
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_out:
         tmp_out_path = tmp_out.name
 
-    # Convert to WAV mono 16k
+    # Cek ffmpeg
+    try:
+        subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception:
+        return "ERROR: ffmpeg tidak terpasang di server."
+
+    # Convert ke WAV mono 16k
     try:
         subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", tmp_in_path,
-                "-ac", "1", "-ar", "16000",
-                tmp_out_path
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True
+            ["ffmpeg", "-y", "-i", tmp_in_path, "-ac", "1", "-ar", "16000", tmp_out_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
     except Exception as e:
-        return f"ERROR FFMPEG CONVERT: {e}"
+        return f"ERROR FFMPEG: {e}"
 
-    # Transcribe WAV
+    # Transcribe
     try:
         result = asr(tmp_out_path)
         if isinstance(result, dict):
             return result.get("text", "")
-        elif isinstance(result, list) and isinstance(result[0], dict):
-            return result[0].get("text", "")
         return str(result)
     except Exception as e:
         return f"ERROR TRANSCRIBE: {e}"
@@ -93,10 +99,9 @@ def transcribe_via_hf(video_bytes):
 
 
 def phi3_api(prompt):
-    """
-    Generate text menggunakan Phi-3 lokal (pipeline HF).
-    """
     llm = get_llm_pipeline()
+    if llm is None:
+        return "ERROR: Model Phi-3 gagal dimuat."
 
     try:
         out = llm(prompt, max_new_tokens=200, do_sample=False)
@@ -104,7 +109,7 @@ def phi3_api(prompt):
             return out[0]["generated_text"]
         return str(out)
     except Exception as e:
-        return f"ERROR: {e}"
+        return f"ERROR LLM: {e}"
 
 
 def prompt_for_classification(question, answer):
@@ -112,29 +117,25 @@ def prompt_for_classification(question, answer):
         "You are an expert HR interviewer and technical evaluator. Your task is to objectively assess the "
         "candidate's response based solely on the provided transcript. You must classify the answer using a strict "
         "0 until 4 scoring rubric.\n\n"
-
         f"{CRITERIA}\n\n"
-
         "Evaluation Rules:\n"
         "- Evaluate ONLY based on the candidate's answer.\n"
         "- Do NOT add missing information, assumptions, or corrections.\n"
         "- Judge relevance, accuracy, clarity, and depth based on the rubric.\n"
         "- Your explanation must be concise and directly tied to the rubric.\n"
         "- You MUST follow the output format exactly.\n\n"
-
         f"Question:\n{question}\n\n"
         f"Candidate Answer (Transcript):\n{answer}\n\n"
-
         "Required Output Format:\n"
         "KLASIFIKASI: <angka>\n"
         "ALASAN: <teks>\n"
     )
 
+
 def parse_model_output(text):
     score_match = re.search(r"KLASIFIKASI[:\- ]*([0-4])", text, re.IGNORECASE)
     if not score_match:
         score_match = re.search(r"\b([0-4])\b", text)
-
     score = int(score_match.group(1)) if score_match else None
 
     reason_match = re.search(r"ALASAN[:\-]\s*(.+)", text, re.IGNORECASE | re.DOTALL)
@@ -143,7 +144,7 @@ def parse_model_output(text):
     return score, reason
 
 
-# ========================= SESSION INIT =========================
+# ========================= SESSION STATE =========================
 for key, default in {
     "page": "input",
     "results": [],
@@ -209,7 +210,6 @@ if st.session_state.processing_done and st.session_state.page == "result":
             progress.success(f"Video {idx+1} selesai ✔")
 
     scores = [r["score"] for r in st.session_state.results if r["score"] is not None]
-
     if len(scores) == 5:
         final_score = sum(scores) / 5
         st.markdown(f"### ⭐ Skor Akhir: **{final_score:.2f} / 4**")
@@ -236,4 +236,3 @@ if st.session_state.processing_done and st.session_state.page == "result":
         st.session_state.results = []
         st.session_state.nama = ""
         st.rerun()
-
